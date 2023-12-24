@@ -30,12 +30,9 @@ ax.add_patch(circle)
 # 绘制机器人
 robots, = ax.plot([], [], 'bo')
 
-# 添加相机的可视范围
-fov_patches_prev = [Arc((robot_positions[i, 0], robot_positions[i, 1]), 2 * radius, 2 * radius, theta1=np.degrees(yaw_angles[i] - fov_angle / 2),
-                theta2=np.degrees(yaw_angles[i] + fov_angle / 2), color='orange', alpha=0.3) for i in range(yaw_angles.shape[0])]
 # 更新函数，每个动画帧调用一次
 def update(frame):
-    global robot_positions, yaw_angles, fov_patches_prev, fov_patched_now
+    global robot_positions, yaw_angles, fov_patches
 
     # 更新偏航角
     yaw_angles += angular_velocity
@@ -44,21 +41,18 @@ def update(frame):
     robot_positions[:, 0] = radius * np.cos(np.arange(num_robots) * 2 * np.pi / num_robots + yaw_angles)
     robot_positions[:, 1] = radius * np.sin(np.arange(num_robots) * 2 * np.pi / num_robots + yaw_angles)
 
-    # 更新相机的可视角度
-    fov_patches_now = [Arc((robot_positions[i, 0], robot_positions[i, 1]), 2 * radius, 2 * radius, theta1=np.degrees(yaw_angles[i] - fov_angle / 2),
-                theta2=np.degrees(yaw_angles[i] + fov_angle / 2), color='orange', alpha=0.3) for i in range(yaw_angles.shape[0])]
-    for fov_patch in fov_patches_now:
+    # 添加相机的可视范围
+    fov_patches = [Arc((robot_positions[i, 0], robot_positions[i, 1]), 2 * radius, 2 * radius, theta1=np.degrees(yaw_angles[i] - fov_angle / 2),
+                    theta2=np.degrees(yaw_angles[i] + fov_angle / 2), color='orange', alpha=0.3) for i in range(yaw_angles.shape[0])]
+
+    for fov_patch in fov_patches:
         ax.add_patch(fov_patch)
-    for patch in ax.patches:
-        if patch in fov_patches_prev:
-            patch.remove()
-    fov_patches_prev = fov_patches_now
-    
+
     # 更新绘图数据
     robots.set_data(robot_positions[:, 0], robot_positions[:, 1])
 
 # 创建动画
-animation = FuncAnimation(fig, update, frames=np.arange(0, 100), interval=10)
+animation = FuncAnimation(fig, update, frames=np.arange(0, 100), interval=50)
 
 # 显示动画
 plt.show()
