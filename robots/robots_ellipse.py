@@ -6,22 +6,24 @@ from matplotlib.patches import Circle
 from matplotlib.patches import Ellipse
 
 class Scene():
-    def __init__(self, num_robots = 4, a = 2, b = 1, angular_velocity = 0.1):
+    def __init__(self, num_robots = 4, a = 2, b = 1.5, angular_velocity = 0.1):
         """初始化场景相关参数"""
         self.num_robots = num_robots
         self.a = a
         self.b = b
-        self.radius = 1
+        self.radius = 1.5
         self.required_angular_velocity = 0.1
         self.angular_velocity = np.array(angular_velocity).repeat(num_robots)
         self.camera_yaw = [- np.pi / 20, 9 * np.pi / 20]
+        self.camera_yaw = np.array(self.camera_yaw)
+        self.camera_yaw = np.tile(self.camera_yaw, (num_robots, 1))
         # self.angular_velocity[0] += 1
         self.dt = 0.1 # 时间步长0.1s（通信频率为10Hz）
         # 初始化机器人相位
         self.robot_phases = np.arange(num_robots) * 2 * np.pi / num_robots
-        self.robot_phases = np.arange(num_robots) * 0.5 * np.pi / num_robots
+        self.robot_phases = np.arange(num_robots) * 1.2 * np.pi / num_robots
         # 根据相位初始化机器人的偏航角
-        self.robot_yaw = self.robot_phases + np.pi / 2
+        self.robot_yaw = - np.arctan2(self.b * np.cos(self.robot_phases), self.a * np.sin(self.robot_phases))
         # 根据相位初始化机器人的位置
         self.get_position()
         self.init_plot()
@@ -54,8 +56,8 @@ class Scene():
         self.fov_patches_prev = []
         for i in range(self.num_robots):
             center = self.robot_positions[i]
-            start_angle = np.degrees(self.robot_yaw[i] - self.camera_yaw[0])
-            end_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[1])
+            start_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[i][0])
+            end_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[i][1])
             radius = 2 * self.radius
             # 画扇形
             theta = np.linspace(start_angle, end_angle, 100)
@@ -78,26 +80,41 @@ class Scene():
     def update_robots(self):
         """更新机器人相关参数"""
         self.update_phases()
-        # self.robot_phases += self.angular_velocity * self.dt
-        self.robot_yaw = self.robot_phases + np.pi / 2
+        # print("Updated robot_phases")
+        self.update_camera_yaw()
+        # self.robot_yaw = np.arctan2(self.b * np.cos(self.robot_phases),  -self.a * np.sin(self.robot_phases))
+        self.check_angle()
         self.get_position()
         self.robots.set_data(self.robot_positions[:, 0], self.robot_positions[:, 1])
-        self.calculate_distance()
 
     def update_phases(self):
         """Core!!!根据控制律更新相位"""
-        self.calculate_distance()
+        self.calculate_phase_residual()
         for i in range(self.num_robots):
             if self.check_visibility(i, (i+1)%self.num_robots) is False:
                 continue
-            distance = self.distance[i][(i+1)%self.num_robots]
-            # 需要的距离为根号二倍的半径
-            desired_distance = np.sqrt(2) * self.radius
-            error = distance - desired_distance
+            phase_residual = self.phase_residual[i, (i+1)%self.num_robots]
+            error = phase_residual - np.pi / 2
+            error = self.check_angle(error)
             # print("error_", i, ":", error)
-            self.angular_velocity[i] = 0.15 * error + self.required_angular_velocity
+            self.angular_velocity[i] = 0.05 * error + self.required_angular_velocity
         self.robot_phases += self.angular_velocity * self.dt
         
+    def update_camera_yaw(self):
+        """更新相机的偏航角"""
+        for i in range(self.num_robots):
+            # 如果看得见目标，则相机的偏航角调整为指向目标
+            if self.check_visibility(i, (i+1)%self.num_robots):
+                # 计算两个机器人之间的夹角
+                angle = np.arctan2(-self.robot_positions[i, 1] + self.robot_positions[(i+1)%self.num_robots, 1], - self.robot_positions[i, 0] + self.robot_positions[(i+1)%self.num_robots, 0])
+                # 计算机器人的偏航角
+                self.robot_yaw[i] = self.check_angle(angle)
+                self.camera_yaw[i] = [-np.pi/4, np.pi/4]
+            else:
+                self.robot_yaw[i] = np.arctan2(self.b * np.cos(self.robot_phases[i]),  -self.a * np.sin(self.robot_phases[i]))
+                self.camera_yaw[i] = [- np.pi / 20, 9 * np.pi / 20]
+            self.check_angle()
+
     def calculate_distance(self):
         """求每个机器人之间的距离"""
         for i in range(self.num_robots):
@@ -105,6 +122,17 @@ class Scene():
                 self.distance[i, j] = np.linalg.norm(self.robot_positions[i] - self.robot_positions[j])
                 self.distance[j, i] = self.distance[i, j]
         # print(self.distance)
+                
+    def calculate_phase_residual(self):
+        """求每个机器人之间的相位差"""
+        self.phase_residual = np.zeros((self.num_robots, self.num_robots))
+        self.check_angle()
+        for i in range(self.num_robots):
+            for j in range(self.num_robots):
+                self.phase_residual[i, j] = self.robot_phases[i] - self.robot_phases[j]
+                self.phase_residual[i, j] = self.check_angle(self.phase_residual[i, j])
+                self.phase_residual[j, i] = self.phase_residual[i, j]
+        # print(self.phase_residual)
 
     def update_fovs(self):
         """更新相机可视范围"""
@@ -114,8 +142,8 @@ class Scene():
             if is_visible == False:
                 continue
             center = self.robot_positions[i]
-            start_angle = np.degrees(self.robot_yaw[i] - self.camera_yaw[0])
-            end_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[1])
+            start_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[i][0])
+            end_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[i][1])
             # 更新扇形
             theta = np.linspace(start_angle, end_angle, 100)
             x = np.append(center[0], center[0] + 2 * self.radius * np.cos(np.radians(theta)))
@@ -147,7 +175,7 @@ class Scene():
         relative_angle = angle - yaw
         relative_angle = self.check_angle(relative_angle)
         # 如果相对角度在相机可视范围内，则可见
-        if relative_angle > - self.camera_yaw[0] and relative_angle < self.camera_yaw[1]:
+        if relative_angle > self.camera_yaw[robot_id_observer][0] and relative_angle < self.camera_yaw[robot_id_observer][1]:
             return True
         else:
             return False

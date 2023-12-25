@@ -3,20 +3,20 @@ import numpy as np
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Arc
 from matplotlib.patches import Circle
-import time
 
 class Scene():
-    def __init__(self, num_robots = 4, radius = 1.0, angular_velocity = 0.1):
+    def __init__(self, num_robots = 6, radius = 1.0, required_angular_velocity = 0.1):
         """初始化场景相关参数"""
         self.num_robots = num_robots
         self.radius = radius
-        self.required_angular_velocity = 0.1 # 集群运动的角速度
-        self.angular_velocity = np.array(angular_velocity).repeat(num_robots) # 每个机器人的角速度
-        self.camera_yaw = [- np.pi / 20, 9 * np.pi / 20] # 相机偏航角设置，后续可更改
+        self.required_angular_velocity = required_angular_velocity
+        self.angular_velocity = np.array(required_angular_velocity).repeat(num_robots)
+        self.acceleration = np.zeros(num_robots)
+        self.camera_yaw = [- np.pi / 20, 9 * np.pi / 20]
         self.dt = 0.1 # 时间步长0.1s（通信频率为10Hz）
         # 初始化机器人相位
-        # self.robot_phases = np.arange(num_robots) * 2 * np.pi / num_robots
-        self.robot_phases = np.arange(num_robots) * 0.5 * np.pi / num_robots
+        self.robot_phases = np.arange(num_robots) * 2 * np.pi / num_robots
+        self.robot_phases = np.arange(num_robots) * 1 * np.pi / num_robots
         # 根据相位初始化机器人的偏航角
         self.robot_yaw = self.robot_phases + np.pi / 2
         # 根据相位初始化机器人的位置
@@ -28,12 +28,12 @@ class Scene():
         """初始化图形"""
         self.fig, self.ax = plt.subplots()
         # 更改fig的窗口大小
-        self.fig.set_size_inches(8, 8)
+        self.fig.set_size_inches(6, 6)
         # 初始化轨迹图
         circle = plt.Circle((0, 0), self.radius, color='gray', fill=False, linestyle='dashed')
         self.ax.add_patch(circle)
         # 初始化机器人以及相机可视范围的颜色
-        self.colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightsalmon'] 
+        self.colors = ['lightblue', 'lightgreen', 'lightcoral', 'lightsalmon', 'aquamarine', 'dodgerblue'] 
         # 初始化机器人
         self.robots, = self.ax.plot([], [], 'bo')
         # print(self.robots)
@@ -51,7 +51,7 @@ class Scene():
         self.fov_patches_prev = []
         for i in range(self.num_robots):
             center = self.robot_positions[i]
-            start_angle = np.degrees(self.robot_yaw[i] - self.camera_yaw[0])
+            start_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[0])
             end_angle = np.degrees(self.robot_yaw[i] + self.camera_yaw[1])
             radius = 2 * self.radius
             # 画扇形
@@ -74,7 +74,8 @@ class Scene():
    
     def update_robots(self):
         """更新机器人相关参数"""
-        self.update_phases() # 根据控制律更新相位
+        self.update_phases()
+        # self.robot_phases += self.angular_velocity * self.dt
         self.robot_yaw = self.robot_phases + np.pi / 2
         self.get_position()
         self.robots.set_data(self.robot_positions[:, 0], self.robot_positions[:, 1])
@@ -83,29 +84,17 @@ class Scene():
     def update_phases(self):
         """Core!!!根据控制律更新相位"""
         self.calculate_distance()
-        is_conv = False
         for i in range(self.num_robots):
             if self.check_visibility(i, (i+1)%self.num_robots) is False:
                 continue
             distance = self.distance[i][(i+1)%self.num_robots]
             # 需要的距离为根号二倍的半径
-            desired_distance = np.sqrt(2) * self.radius
+            desired_distance = self.radius
             error = distance - desired_distance
             # print("error_", i, ":", error)
-            # 给加上随机噪声
-            if abs(error) < 0.0001:
-                is_conv = True
-            else:
-                is_conv = False
-            self.angular_velocity[i] = 0.1 * error + self.required_angular_velocity + np.random.normal(0, 0.01)
+            self.angular_velocity[i] = 0.15 * error + self.required_angular_velocity
         self.robot_phases += self.angular_velocity * self.dt
-        if is_conv:
-            end = time.time()
-            print("Time cost:", end - self.start)
-            print("Convergence!")
-            # 停止动画
-            self.ani.event_source.stop()
-            
+        
     def calculate_distance(self):
         """求每个机器人之间的距离"""
         for i in range(self.num_robots):
@@ -143,10 +132,9 @@ class Scene():
         """检查机器人robot_id_observed是否在robot_id_observer的相机可视范围内"""
         # 计算两个机器人之间的距离
         distance = np.linalg.norm(self.robot_positions[robot_id_observer] - self.robot_positions[robot_id_observed])
-        # 如果距离大于相机可视范围，则不可见
-        if distance > 2 * self.radius or distance < 0.25 * self.radius:
+        # 如果距离大于相机可视范围的两倍，则不可见
+        if distance > 2 * self.radius:
             return False
-        
         # 计算两个机器人之间的夹角
         angle = np.arctan2(self.robot_positions[robot_id_observed, 1] - self.robot_positions[robot_id_observer, 1], self.robot_positions[robot_id_observed, 0] - self.robot_positions[robot_id_observer, 0])
         # 计算机器人的偏航角
@@ -162,7 +150,6 @@ class Scene():
             return False
         
     def check_angle(self, angle = 0.0):
-        """将角度限制在[-pi, pi]范围内"""
         for i in range(self.num_robots):
             while self.robot_yaw[i] > np.pi:
                 self.robot_yaw[i] -= 2 * np.pi
@@ -175,9 +162,7 @@ class Scene():
         return angle
 
     def visualize(self):
-        # 给程序计时
-        self.start = time.time()
-        anim = FuncAnimation(self.fig, self.update, frames=np.arange(0, 100), interval=30)
+        anim = FuncAnimation(self.fig, self.update, frames=np.arange(0, 100), interval=100)
         plt.show()
 
 if __name__ == '__main__':
