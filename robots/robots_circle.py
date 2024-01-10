@@ -12,6 +12,7 @@ class Scene():
         self.radius = radius
         self.required_angular_velocity = 0.1 # 集群运动的角速度
         self.angular_velocity = np.array(angular_velocity).repeat(num_robots) # 每个机器人的角速度
+        self.acceleration = np.zeros(num_robots) # 每个机器人的加速度
         self.camera_yaw = [- np.pi / 20, 9 * np.pi / 20] # 相机偏航角设置，后续可更改
         self.dt = 0.1 # 时间步长0.1s（通信频率为10Hz）
         # 初始化机器人相位
@@ -28,7 +29,7 @@ class Scene():
         """初始化图形"""
         self.fig, self.ax = plt.subplots()
         # 更改fig的窗口大小
-        self.fig.set_size_inches(8, 8)
+        self.fig.set_size_inches(6, 6)
         # 初始化轨迹图
         circle = plt.Circle((0, 0), self.radius, color='gray', fill=False, linestyle='dashed')
         self.ax.add_patch(circle)
@@ -91,20 +92,14 @@ class Scene():
             # 需要的距离为根号二倍的半径
             desired_distance = np.sqrt(2) * self.radius
             error = distance - desired_distance
-            # print("error_", i, ":", error)
-            # 给加上随机噪声
-            if abs(error) < 0.0001:
-                is_conv = True
-            else:
-                is_conv = False
-            self.angular_velocity[i] = 0.1 * error + self.required_angular_velocity + np.random.normal(0, 0.01)
+            # self.angular_velocity[i] = 0.15 * error + self.required_angular_velocity
+            limitation_distance = 2 * self.radius
+            control_gain = 0.3 * error / (limitation_distance - distance)**2
+            self.angular_velocity[i] = control_gain + self.required_angular_velocity
+            self.angular_velocity[i] = max(self.angular_velocity[i], 0)
+            self.angular_velocity[i] = min(self.angular_velocity[i], 2 * self.required_angular_velocity)
+
         self.robot_phases += self.angular_velocity * self.dt
-        if is_conv:
-            end = time.time()
-            print("Time cost:", end - self.start)
-            print("Convergence!")
-            # 停止动画
-            self.ani.event_source.stop()
             
     def calculate_distance(self):
         """求每个机器人之间的距离"""

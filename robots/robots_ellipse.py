@@ -4,8 +4,9 @@ from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Arc
 from matplotlib.patches import Circle
 from matplotlib.patches import Ellipse
+from robots_circle import Scene
 
-class Scene():
+class Scene_ellipse(Scene):
     def __init__(self, num_robots = 4, a = 2, b = 1.5, angular_velocity = 0.1):
         """初始化场景相关参数"""
         self.num_robots = num_robots
@@ -90,14 +91,20 @@ class Scene():
     def update_phases(self):
         """Core!!!根据控制律更新相位"""
         self.calculate_phase_residual()
+        self.calculate_distance()
         for i in range(self.num_robots):
             if self.check_visibility(i, (i+1)%self.num_robots) is False:
                 continue
+            distance = self.distance[i][(i+1)%self.num_robots]
+            limitation_distance = 2 * self.radius
             phase_residual = self.phase_residual[i, (i+1)%self.num_robots]
             error = phase_residual - np.pi / 2
             error = self.check_angle(error)
+            control_gain = 0.1 * error / (limitation_distance - distance)**2
             # print("error_", i, ":", error)
-            self.angular_velocity[i] = 0.05 * error + self.required_angular_velocity
+            self.angular_velocity[i] = control_gain + self.required_angular_velocity
+            self.angular_velocity[i] = max(self.angular_velocity[i], 0)
+            self.angular_velocity[i] = min(self.angular_velocity[i], 2 * self.required_angular_velocity)
         self.robot_phases += self.angular_velocity * self.dt
         
     def update_camera_yaw(self):
@@ -197,5 +204,5 @@ class Scene():
         plt.show()
 
 if __name__ == '__main__':
-    scene = Scene()
+    scene = Scene_ellipse()
     scene.visualize()

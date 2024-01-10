@@ -88,11 +88,15 @@ class Scene():
             if self.check_visibility(i, (i+1)%self.num_robots) is False:
                 continue
             distance = self.distance[i][(i+1)%self.num_robots]
-            # 需要的距离为根号二倍的半径
+            # 六边形编队需要的距离为一倍的半径
             desired_distance = self.radius
             error = distance - desired_distance
-            # print("error_", i, ":", error)
-            self.angular_velocity[i] = 0.15 * error + self.required_angular_velocity
+            # self.angular_velocity[i] = 0.15 * error + self.required_angular_velocity
+            limitation_distance = 2 * self.radius
+            control_gain = 0.5 * error / (limitation_distance - distance)**2
+            self.angular_velocity[i] = control_gain + self.required_angular_velocity
+            self.angular_velocity[i] = max(self.angular_velocity[i], 0)
+            self.angular_velocity[i] = min(self.angular_velocity[i], 2 * self.required_angular_velocity)
         self.robot_phases += self.angular_velocity * self.dt
         
     def calculate_distance(self):
